@@ -1,0 +1,50 @@
+---
+source: crates/rolldown_testing/src/integration_test.rs
+---
+# Assets
+
+## index.js
+
+```js
+import { StateCode, getStateCodeFromHttpStatus } from "./state-codes.js";
+import { MyComponent } from "./wrapper.js";
+export { MyComponent, StateCode, getStateCodeFromHttpStatus };
+
+```
+
+## state-codes.js
+
+```js
+//#region state-codes.js
+const StateCode = {
+	SUCCESS: "success",
+	ERROR: "error",
+	WAITING: "waiting"
+};
+function getStateCodeFromHttpStatus(code) {
+	if (code === 200) return StateCode.SUCCESS;
+	if (code >= 400) return StateCode.ERROR;
+	return StateCode.WAITING;
+}
+//#endregion
+export { StateCode, getStateCodeFromHttpStatus };
+
+```
+
+## wrapper.js
+
+```js
+import { StateCode, getStateCodeFromHttpStatus } from "./state-codes.js";
+//#region wrapper.js
+var MyComponent = class {
+	constructor() {
+		this.state = StateCode.WAITING;
+	}
+	setState(code) {
+		this.state = code;
+	}
+};
+//#endregion
+export { MyComponent, StateCode, getStateCodeFromHttpStatus };
+
+```

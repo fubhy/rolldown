@@ -318,6 +318,10 @@ impl LinkStage<'_> {
       }
     }
 
+    // Under `preserveModules`, preserve each module's re-exports whose canonical value survived
+    // tree-shaking, so every emitted file mirrors its source's export interface (issue #9122).
+    preserve_reexported_interfaces(context);
+
     dynamic_entries.retain(|entry| included_dynamic_entry.contains(&entry.idx));
 
     // update entries with lived only.
@@ -654,6 +658,60 @@ pub fn include_runtime_symbol(
 }
 
 /// if no export is used, and the module has no side effects, the module should not be included
+/// Preserve re-exported interfaces for `preserveModules`.
+///
+/// Every module maps 1:1 to an output file whose `export { ... }` must mirror the source module's
+/// interface, so a consumer importing the file by path sees the same API. A re-export
+/// (`export { x } from './y'`) resolves to a *canonical* symbol owned by `./y`, so downstream
+/// consumers bind that canonical directly and bypass this module's facade binding — leaving the
+/// facade unreferenced and tree-shaken out of this file's exports (issue #9122).
+///
+/// This re-marks such facades as used and includes their re-export statement (so the cross-chunk
+/// import is generated), gated on the *canonical* symbol having survived normal tree-shaking: a
+/// re-export is preserved only when the underlying value is actually retained somewhere reachable
+/// from the entries. A genuinely-unused export (nothing in the bundle consumes it) keeps being
+/// tree-shaken, matching Rollup. The synthetic runtime module is excluded — its helpers stay
+/// demand-driven.
+///
+/// Must run once, after the inclusion fixpoint has settled `used_symbol_refs`. It only includes
+/// re-export statements that reference already-retained canonicals, so it introduces no new
+/// reachable values and needs no further convergence.
+fn preserve_reexported_interfaces(ctx: &mut IncludeContext) {
+  if !ctx.options.preserve_modules {
+    return;
+  }
+  let mut retained_reexport_facades: Vec<(ModuleIdx, SymbolRef)> = vec![];
+  for (module_idx, meta) in ctx.metas.iter_enumerated() {
+    if module_idx == ctx.runtime_idx
+      || !ctx.is_module_included_vec.has_bit(module_idx)
+      || ctx.modules[module_idx].as_normal().is_none()
+    {
+      continue;
+    }
+    for name in meta.sorted_and_non_ambiguous_resolved_exports.keys() {
+      let symbol_ref = meta.resolved_exports[name].symbol_ref;
+      let canonical_ref = ctx.symbols.canonical_ref_for(symbol_ref);
+      // `symbol_ref == canonical_ref` is a local export (`export const x`); it already carries the
+      // canonical symbol, so the normal `used_symbol_refs` check in chunk-export generation handles
+      // it. Only re-export facades need re-marking, and only when their canonical is retained.
+      if symbol_ref != canonical_ref && ctx.used_symbol_refs.contains(&canonical_ref) {
+        retained_reexport_facades.push((module_idx, symbol_ref));
+      }
+    }
+  }
+  for (module_idx, symbol_ref) in retained_reexport_facades {
+    let Module::Normal(module) = &ctx.modules[module_idx] else {
+      continue;
+    };
+    let declaring_stmts =
+      ctx.stmt_infos[module_idx].declared_stmts_by_symbol(&symbol_ref).to_vec();
+    for stmt_info_id in declaring_stmts {
+      include_statement(ctx, module, stmt_info_id);
+    }
+    include_symbol_and_check_cjs_bailout(ctx, symbol_ref, SymbolIncludeReason::EntryExport);
+  }
+}
+
 pub fn include_module(ctx: &mut IncludeContext, module: &NormalModule) {
   if !ctx.is_module_included_vec.set_bit(module.idx) {
     return;

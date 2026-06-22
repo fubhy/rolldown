@@ -1,0 +1,12 @@
+{
+  "_comment": "Test for issue #9122: With preserveModules, re-exports of imported bindings (`export { X } from './x.js'`) are dropped from the emitted chunk when the module also imports the same binding for internal use. `dist/wrapper.js` should re-export StateCode and getStateCodeFromHttpStatus, not only MyComponent.",
+  "config": {
+    "input": [
+      {
+        "name": "index",
+        "import": "./index.js"
+      }
+    ],
+    "preserveModules": true
+  }
+}
