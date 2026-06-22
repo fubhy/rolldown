@@ -661,17 +661,19 @@ pub fn include_runtime_symbol(
 /// Preserve re-exported interfaces for `preserveModules`.
 ///
 /// Every module maps 1:1 to an output file whose `export { ... }` must mirror the source module's
-/// interface, so a consumer importing the file by path sees the same API. A re-export
-/// (`export { x } from './y'`) resolves to a *canonical* symbol owned by `./y`, so downstream
-/// consumers bind that canonical directly and bypass this module's facade binding — leaving the
-/// facade unreferenced and tree-shaken out of this file's exports (issue #9122).
+/// interface. A re-export (`export { x } from './y'`) resolves to a *canonical* symbol owned by
+/// `./y`, and consumers bind that canonical directly, bypassing this module's facade binding — so
+/// the facade is tree-shaken out of this file's exports (issue #9122).
 ///
-/// This re-marks such facades as used and includes their re-export statement (so the cross-chunk
-/// import is generated), gated on the *canonical* symbol having survived normal tree-shaking: a
-/// re-export is preserved only when the underlying value is actually retained somewhere reachable
-/// from the entries. A genuinely-unused export (nothing in the bundle consumes it) keeps being
-/// tree-shaken, matching Rollup. The synthetic runtime module is excluded — its helpers stay
-/// demand-driven.
+/// We re-mark a facade as used and include its re-export statement (so the cross-chunk import is
+/// generated) only when the facade is actually consumed *through* this module — i.e. it appears as
+/// an intermediate in the export chain of some used import, recorded in
+/// `normal_symbol_exports_chain_map`. This is chain-granular: a re-export nobody imports through
+/// this module stays tree-shaken, even when the same canonical is used via a different module path
+/// (e.g. a side-effect-only wrapper re-exporting `foo` while a consumer reaches `foo` straight from
+/// its source); a genuinely-unused export likewise stays tree-shaken because no used import reaches
+/// it. `#9122`'s `wrapper` keeps `StateCode`/`getX` because the entry imports them *through*
+/// `wrapper` (`export { … } from './wrapper.js'`). The synthetic runtime module is excluded.
 ///
 /// Must run once, after the inclusion fixpoint has settled `used_symbol_refs`. It only includes
 /// re-export statements that reference already-retained canonicals, so it introduces no new
@@ -680,31 +682,23 @@ fn preserve_reexported_interfaces(ctx: &mut IncludeContext) {
   if !ctx.options.preserve_modules {
     return;
   }
-  let mut retained_reexport_facades: Vec<(ModuleIdx, SymbolRef)> = vec![];
-  for (module_idx, meta) in ctx.metas.iter_enumerated() {
-    if module_idx == ctx.runtime_idx
-      || !ctx.is_module_included_vec.has_bit(module_idx)
-      || ctx.modules[module_idx].as_normal().is_none()
-    {
-      continue;
-    }
-    for name in meta.sorted_and_non_ambiguous_resolved_exports.keys() {
-      let symbol_ref = meta.resolved_exports[name].symbol_ref;
-      let canonical_ref = ctx.symbols.canonical_ref_for(symbol_ref);
-      // `symbol_ref == canonical_ref` is a local export (`export const x`); it already carries the
-      // canonical symbol, so the normal `used_symbol_refs` check in chunk-export generation handles
-      // it. Only re-export facades need re-marking, and only when their canonical is retained.
-      if symbol_ref != canonical_ref && ctx.used_symbol_refs.contains(&canonical_ref) {
-        retained_reexport_facades.push((module_idx, symbol_ref));
-      }
+  // Collect every intermediate re-export facade that lies on the export chain of a *used* imported
+  // symbol — these are the facades consumed through their own module.
+  let mut consumed_facades: FxHashSet<SymbolRef> = FxHashSet::default();
+  for (imported_as_ref, reexports) in ctx.normal_symbol_exports_chain_map {
+    if ctx.used_symbol_refs.contains(imported_as_ref) {
+      consumed_facades.extend(reexports.iter().copied());
     }
   }
-  for (module_idx, symbol_ref) in retained_reexport_facades {
+  for symbol_ref in consumed_facades {
+    let module_idx = symbol_ref.owner;
+    if module_idx == ctx.runtime_idx || !ctx.is_module_included_vec.has_bit(module_idx) {
+      continue;
+    }
     let Module::Normal(module) = &ctx.modules[module_idx] else {
       continue;
     };
-    let declaring_stmts =
-      ctx.stmt_infos[module_idx].declared_stmts_by_symbol(&symbol_ref).to_vec();
+    let declaring_stmts = ctx.stmt_infos[module_idx].declared_stmts_by_symbol(&symbol_ref).to_vec();
     for stmt_info_id in declaring_stmts {
       include_statement(ctx, module, stmt_info_id);
     }
