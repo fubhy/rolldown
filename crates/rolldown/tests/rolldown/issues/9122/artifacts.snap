@@ -6,9 +6,9 @@ source: crates/rolldown_testing/src/integration_test.rs
 ## index.js
 
 ```js
-import { StateCode, getStateCodeFromHttpStatus } from "./state-codes.js";
-import { MyComponent } from "./wrapper.js";
-export { MyComponent, StateCode, getStateCodeFromHttpStatus };
+import { StateCode } from "./state-codes.js";
+import { initialState } from "./wrapper.js";
+export { StateCode, initialState };
 
 ```
 
@@ -16,35 +16,19 @@ export { MyComponent, StateCode, getStateCodeFromHttpStatus };
 
 ```js
 //#region state-codes.js
-const StateCode = {
-	SUCCESS: "success",
-	ERROR: "error",
-	WAITING: "waiting"
-};
-function getStateCodeFromHttpStatus(code) {
-	if (code === 200) return StateCode.SUCCESS;
-	if (code >= 400) return StateCode.ERROR;
-	return StateCode.WAITING;
-}
+const StateCode = "waiting";
 //#endregion
-export { StateCode, getStateCodeFromHttpStatus };
+export { StateCode };
 
 ```
 
 ## wrapper.js
 
 ```js
-import { StateCode, getStateCodeFromHttpStatus } from "./state-codes.js";
+import { StateCode } from "./state-codes.js";
 //#region wrapper.js
-var MyComponent = class {
-	constructor() {
-		this.state = StateCode.WAITING;
-	}
-	setState(code) {
-		this.state = code;
-	}
-};
+const initialState = StateCode;
 //#endregion
-export { MyComponent, StateCode, getStateCodeFromHttpStatus };
+export { StateCode, initialState };
 
 ```

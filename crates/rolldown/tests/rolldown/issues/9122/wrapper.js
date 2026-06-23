@@ -1,14 +1,7 @@
 import { StateCode } from './state-codes.js';
 
-// This component uses StateCode internally
-export class MyComponent {
-  constructor() {
-    this.state = StateCode.WAITING;
-  }
-  setState(code) {
-    this.state = code;
-  }
-}
+// uses the imported binding internally
+export const initialState = StateCode;
 
-// Re-export StateCode and getStateCodeFromHttpStatus for consumers of ./wrapper
-export { StateCode, getStateCodeFromHttpStatus } from './state-codes.js';
+// re-exports the same imported binding for consumers of ./wrapper
+export { StateCode } from './state-codes.js';

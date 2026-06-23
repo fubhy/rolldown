@@ -1,1 +1,1 @@
-export { MyComponent, StateCode, getStateCodeFromHttpStatus } from './wrapper.js';
+export { initialState, StateCode } from './wrapper.js';
